@@ -1,3 +1,5 @@
+# Sanket Keni's Rossman Sales Prediction-Kaggle
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -7,19 +9,8 @@ import matplotlib
 matplotlib.use("Agg") #Needed to save figures
 import matplotlib.pyplot as plt
 
-def create_feature_map(features):
-    outfile = open('xgb.fmap', 'w')
-    for i, feat in enumerate(features):
-        outfile.write('{0}\t{1}\tq\n'.format(i, feat))
-    outfile.close()
 
-def rmspe(y, yhat):
-    return np.sqrt(np.mean((yhat/y-1) ** 2))
 
-def rmspe_xg(yhat, y):
-    y = np.expm1(y.get_label())
-    yhat = np.expm1(yhat)
-    return "rmspe", rmspe(y,yhat)
 
 # Gather some features
 def build_features(features, data):
@@ -126,7 +117,7 @@ params = {"objective": "reg:linear",
           "silent": 1,
           "seed": 1301
           }
-num_boost_round = 120#number of iterations
+num_boost_round = 170#number of iterations
 
 print("Train a XGBoost model")
 X_train, X_valid = train_test_split(train, test_size=0.012, random_state=10)
@@ -134,6 +125,14 @@ y_train = np.log1p(X_train.Sales)
 y_valid = np.log1p(X_valid.Sales)
 dtrain = xgb.DMatrix(X_train[features], y_train)
 dvalid = xgb.DMatrix(X_valid[features], y_valid)
+
+def rmspe(y, yhat):
+    return np.sqrt(np.mean(((y-yhat)/y) ** 2))
+
+def rmspe_xg(yhat, y):
+    y = np.expm1(y.get_label()) #get_label() - Get the label of the DMatrix.
+    yhat = np.expm1(yhat)
+    return "rmspe", rmspe(y,yhat)
 
 watchlist = [(dtrain, 'train'), (dvalid, 'eval')]
 gbm = xgb.train(params, dtrain, num_boost_round, evals=watchlist, \
@@ -156,6 +155,12 @@ result.to_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\out.csv"
 
 # XGB feature importances
 # Based on https://www.kaggle.com/mmueller/liberty-mutual-group-property-inspection-prediction/xgb-feature-importance-python/code
+
+def create_feature_map(features):
+    outfile = open('xgb.fmap', 'w')
+    for i, feat in enumerate(features):
+        outfile.write('{0}\t{1}\tq\n'.format(i, feat))
+    outfile.close()
 
 create_feature_map(features)
 importance = gbm.get_fscore(fmap='xgb.fmap')
