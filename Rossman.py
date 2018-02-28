@@ -43,7 +43,7 @@ def build_features(features, data):
     data['DayOfWeek'] = data.Date.dt.dayofweek
     data['WeekOfYear'] = data.Date.dt.weekofyear
 
-    # CompetionOpen en PromoOpen from https://www.kaggle.com/
+    # CompetionOpen en PromoOpen from https://www.kaggle.com/ananya77041/rossmann-store-sales/randomforestpython/code
     # Calculate time competition open time in months
     features.append('CompetitionOpen')
     data['CompetitionOpen'] = 12 * (data.Year - data.CompetitionOpenSinceYear) + \
@@ -104,6 +104,18 @@ build_features([], test)
 print(features)
 
 print('training data processed')
+'''
+eta - step size shrinkage used in update to prevents overfitting. After each 
+boosting step, we can directly get the weights of new features. and eta actually 
+shrinks the feature weights to make the boosting process more conservative.
+
+max_depth - maximum depth of a tree, increase this value will make the model more 
+complex / likely to be overfitting. 0 indicates no limit, limit is required for 
+depth-wise grow policy.
+
+subsample- subsample ratio of the training instance
+
+'''
 
 params = {"objective": "reg:linear",
           "booster" : "gbtree",
@@ -131,9 +143,9 @@ print("Validating")
 yhat = gbm.predict(xgb.DMatrix(X_valid[features]))
 error = rmspe(X_valid.Sales.values, np.expm1(yhat))
 print('RMSPE: {:.6f}'.format(error))
+#RMSPE - Root Mean Square Percentage Error 
 
 test['StateHoliday'] = test['StateHoliday'].astype('int32')
-
 print("Make predictions on the test set")
 dtest = xgb.DMatrix(test[features])
 test_probs = gbm.predict(dtest)
