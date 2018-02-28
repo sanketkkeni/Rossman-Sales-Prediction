@@ -1,296 +1,159 @@
-import warnings
-warnings.filterwarnings("ignore")
-
-# loading packages
-# basic + dates 
-import numpy as np
 import pandas as pd
-from pandas import datetime
-
-# data visualization
+import numpy as np
+from sklearn.model_selection import train_test_split
+import xgboost as xgb
+import operator
+import matplotlib
+matplotlib.use("Agg") #Needed to save figures
 import matplotlib.pyplot as plt
-import seaborn as sns # advanced vizs
-
-# statistics
-from statsmodels.distributions.empirical_distribution import ECDF
-
-# time series analysis
-from statsmodels.tsa.seasonal import seasonal_decompose
-from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-
-# prophet by Facebook
-from fbprophet import Prophet
-# importing train data to learn
-train = pd.read_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\train.csv", 
-                    parse_dates = True, low_memory = False, index_col = 'Date')
-
-# additional store data
-store = pd.read_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\store.csv", 
-                    low_memory = False)
-# time series as indexes
-train.index
-# first glance at the train set: head and tail
-print("In total: ", train.shape)
-train.head(5)
-# data extraction
-train['Year'] = train.index.year
-train['Month'] = train.index.month
-train['Day'] = train.index.day
-train['WeekOfYear'] = train.index.weekofyear
-
-# adding new variable
-train['SalePerCustomer'] = train['Sales']/train['Customers']
-train['SalePerCustomer'].describe()
-
-sns.set(style = "ticks")# to format into seaborn 
-c = '#386B7F' # basic color for plots
-plt.figure(figsize = (12, 6))
-
-plt.subplot(311)
-cdf = ECDF(train['Sales'])
-plt.plot(cdf.x, cdf.y, label = "statmodels", color = c);
-plt.xlabel('Sales'); plt.ylabel('ECDF');
-
-# plot second ECDF  
-plt.subplot(312)
-cdf = ECDF(train['Customers'])
-plt.plot(cdf.x, cdf.y, label = "statmodels", color = c);
-plt.xlabel('Customers');
-
-# plot second ECDF  
-plt.subplot(313)
-cdf = ECDF(train['SalePerCustomer'])
-plt.plot(cdf.x, cdf.y, label = "statmodels", color = c);
-plt.xlabel('Sale per Customer');
-
-# closed stores
-train[(train.Open == 0) & (train.Sales == 0)].head()
-# opened stores with zero sales
-zero_sales = train[(train.Open != 0) & (train.Sales == 0)]
-print("In total: ", zero_sales.shape)
-zero_sales.head(5)
-print("Closed stores and days which didn't have any sales won't be counted into the forecasts.")
-train = train[(train["Open"] != 0) & (train['Sales'] != 0)]
-
-print("In total: ", train.shape)
-# additional information about the stores
-store.head()
-# missing values?
-store.isnull().sum()
-# missing values in CompetitionDistance
-store[pd.isnull(store.CompetitionDistance)]
-# fill NaN with a median value (skewed distribuion)
-store['CompetitionDistance'].fillna(store['CompetitionDistance'].median(), inplace = True)
-
-# no promo = no information about the promo?
-_ = store[pd.isnull(store.Promo2SinceWeek)]
-_[_.Promo2 != 0].shape
-
-# replace NA's by 0
-store.fillna(0, inplace = True)
-
-print("Joining train set with an additional store information.")
-
-# by specifying inner join we make sure that only those observations 
-# that are present in both train and store sets are merged together
-train_store = pd.merge(train, store, how = 'inner', on = 'Store')
-
-print("In total: ", train_store.shape)
-train_store.head()
-
-train_store.groupby('StoreType')['Sales'].describe()
-train_store.groupby('StoreType')['Customers', 'Sales'].sum()
-# sales trends
-sns.factorplot(data = train_store, x = 'Month', y = "Sales", 
-               col = 'StoreType', # per store type in cols
-               palette = 'plasma',
-               hue = 'StoreType',
-               row = 'Promo', # per promo in the store in rows
-               color = c) 
-# sales trends
-sns.factorplot(data = train_store, x = 'Month', y = "Customers", 
-               col = 'StoreType', # per store type in cols
-               palette = 'plasma',
-               hue = 'StoreType',
-               row = 'Promo', # per promo in the store in rows
-               color = c) 
-# sale per customer trends
-sns.factorplot(data = train_store, x = 'Month', y = "SalePerCustomer", 
-               col = 'StoreType', # per store type in cols
-               palette = 'plasma',
-               hue = 'StoreType',
-               row = 'Promo', # per promo in the store in rows
-               color = c) 
-# customers
-sns.factorplot(data = train_store, x = 'Month', y = "Sales", 
-               col = 'DayOfWeek', # per store type in cols
-               palette = 'plasma',
-               hue = 'StoreType',
-               row = 'StoreType', # per store type in rows
-               color = c)
 
-# stores which are opened on Sundays
-train_store[(train_store.Open == 1) & (train_store.DayOfWeek == 7)]['Store'].unique()
-
-# competition open time (in months)
-train_store['CompetitionOpen'] = 12 * (train_store.Year - train_store.CompetitionOpenSinceYear) + \
-        (train_store.Month - train_store.CompetitionOpenSinceMonth)
-    
-# Promo open time
-train_store['PromoOpen'] = 12 * (train_store.Year - train_store.Promo2SinceYear) + \
-        (train_store.WeekOfYear - train_store.Promo2SinceWeek) / 4.0
-
-# replace NA's by 0
-train_store.fillna(0, inplace = True)
-
-# average PromoOpen time and CompetitionOpen time per store type
-train_store.loc[:, ['StoreType', 'Sales', 'Customers', 'PromoOpen', 'CompetitionOpen']].groupby('StoreType').mean()
-
-# Compute the correlation matrix 
-# exclude 'Open' variable
-corr_all = train_store.drop('Open', axis = 1).corr()
-
-# Generate a mask for the upper triangle
-mask = np.zeros_like(corr_all, dtype = np.bool)
-mask[np.triu_indices_from(mask)] = True
-
-# Set up the matplotlib figure
-f, ax = plt.subplots(figsize = (11, 9))
-
-# Draw the heatmap with the mask and correct aspect ratio
-sns.heatmap(corr_all, mask = mask,
-            square = True, linewidths = .5, ax = ax, cmap = "BuPu")      
-plt.show()
-
-# sale per customer trends
-sns.factorplot(data = train_store, x = 'DayOfWeek', y = "Sales", 
-               col = 'Promo', 
-               row = 'Promo2',
-               hue = 'Promo2',
-               palette = 'RdPu') 
-
-
-
-
-# preparation: input should be float type
-train['Sales'] = train['Sales'] * 1.0
-
-# store types
-sales_a = train[train.Store == 2]['Sales']
-sales_b = train[train.Store == 85]['Sales'].sort_index(ascending = True) # solve the reverse order
-sales_c = train[train.Store == 1]['Sales']
-sales_d = train[train.Store == 13]['Sales']
-
-f, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize = (12, 13))
-
-# store types
-sales_a.resample('W').sum().plot(color = c, ax = ax1)
-sales_b.resample('W').sum().plot(color = c, ax = ax2)
-sales_c.resample('W').sum().plot(color = c, ax = ax3)
-sales_d.resample('W').sum().plot(color = c, ax = ax4)
-
-f, (ax1, ax2, ax3, ax4) = plt.subplots(4, figsize = (12, 13))
-
-# monthly
-decomposition_a = seasonal_decompose(sales_a, model = 'additive', freq = 365)
-decomposition_a.trend.plot(color = c, ax = ax1)
-
-decomposition_b = seasonal_decompose(sales_b, model = 'additive', freq = 365)
-decomposition_b.trend.plot(color = c, ax = ax2)
-
-decomposition_c = seasonal_decompose(sales_c, model = 'additive', freq = 365)
-decomposition_c.trend.plot(color = c, ax = ax3)
-
-decomposition_d = seasonal_decompose(sales_d, model = 'additive', freq = 365)
-decomposition_d.trend.plot(color = c, ax = ax4)
-
-
-# figure for subplots
-plt.figure(figsize = (12, 8))
-
-# acf and pacf for A
-plt.subplot(421); plot_acf(sales_a, lags = 50, ax = plt.gca(), color = c)
-plt.subplot(422); plot_pacf(sales_a, lags = 50, ax = plt.gca(), color = c)
-
-# acf and pacf for B
-plt.subplot(423); plot_acf(sales_b, lags = 50, ax = plt.gca(), color = c)
-plt.subplot(424); plot_pacf(sales_b, lags = 50, ax = plt.gca(), color = c)
-
-# acf and pacf for C
-plt.subplot(425); plot_acf(sales_c, lags = 50, ax = plt.gca(), color = c)
-plt.subplot(426); plot_pacf(sales_c, lags = 50, ax = plt.gca(), color = c)
-
-# acf and pacf for D
-plt.subplot(427); plot_acf(sales_d, lags = 50, ax = plt.gca(), color = c)
-plt.subplot(428); plot_pacf(sales_d, lags = 50, ax = plt.gca(), color = c)
-
-plt.show()
-
-
-###Time Series Analysis and Forecasting with Prophet
-
-# importing data
-df = pd.read_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\train.csv",  
-                    low_memory = False)
-
-# remove closed stores and those with no sales
-df = df[(df["Open"] != 0) & (df['Sales'] != 0)]
-
-# sales for the store number 1 (StoreType C)
-sales = df[df.Store == 1].loc[:, ['Date', 'Sales']]
-
-# reverse to the order: from 2013 to 2015
-sales = sales.sort_index(ascending = False)
-
-# to datetime64
-sales['Date'] = pd.DatetimeIndex(sales['Date'])
-sales.dtypes
-
-# from the prophet documentation every variables should have specific names
-sales = sales.rename(columns = {'Date': 'ds',
-                                'Sales': 'y'})
-sales.head()
-
-# plot daily sales
-ax = sales.set_index('ds').plot(figsize = (12, 4), color = c)
-ax.set_ylabel('Daily Number of Sales')
-ax.set_xlabel('Date')
-plt.show()
-
-# create holidays dataframe
-state_dates = df[(df.StateHoliday == 'a') | (df.StateHoliday == 'b') & (df.StateHoliday == 'c')].loc[:, 'Date'].values
-school_dates = df[df.SchoolHoliday == 1].loc[:, 'Date'].values
-
-state = pd.DataFrame({'holiday': 'state_holiday',
-                      'ds': pd.to_datetime(state_dates)})
-school = pd.DataFrame({'holiday': 'school_holiday',
-                      'ds': pd.to_datetime(school_dates)})
-
-holidays = pd.concat((state, school))      
-holidays.head()
-
-# set the uncertainty interval to 95% (the Prophet default is 80%)
-my_model = Prophet(interval_width = 0.95, 
-                   holidays = holidays)
-my_model.fit(sales)
-
-# dataframe that extends into future 6 weeks 
-future_dates = my_model.make_future_dataframe(periods = 6*7)
-
-print("First week to forecast.")
-future_dates.tail(7)
-
-
-# predictions
-forecast = my_model.predict(future_dates)
-
-# preditions for last week
-forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(7)
-
-fc = forecast[['ds', 'yhat']].rename(columns = {'Date': 'ds', 'Forecast': 'yhat'})
-
-# visualizing predicions
-my_model.plot(forecast);
-my_model.plot_components(forecast);
-
-
+def create_feature_map(features):
+    outfile = open('xgb.fmap', 'w')
+    for i, feat in enumerate(features):
+        outfile.write('{0}\t{1}\tq\n'.format(i, feat))
+    outfile.close()
+
+def rmspe(y, yhat):
+    return np.sqrt(np.mean((yhat/y-1) ** 2))
+
+def rmspe_xg(yhat, y):
+    y = np.expm1(y.get_label())
+    yhat = np.expm1(yhat)
+    return "rmspe", rmspe(y,yhat)
+
+# Gather some features
+def build_features(features, data):
+    # remove NaNs
+    data.fillna(0, inplace=True)
+    data.loc[data.Open.isnull(), 'Open'] = 1
+    # Use some properties directly
+    features.extend(['Store', 'CompetitionDistance', 'Promo', 'Promo2', 'SchoolHoliday'])
+
+    # Label encode some features
+    features.extend(['StoreType', 'Assortment', 'StateHoliday'])
+    mappings = {'0':0, 'a':1, 'b':2, 'c':3, 'd':4}
+    data.StoreType.replace(mappings, inplace=True)
+    data.Assortment.replace(mappings, inplace=True)
+    data.StateHoliday.replace(mappings, inplace=True)
+
+    features.extend(['DayOfWeek', 'Month', 'Day', 'Year', 'WeekOfYear'])
+    data['Year'] = data.Date.dt.year
+    data['Month'] = data.Date.dt.month
+    data['Day'] = data.Date.dt.day
+    data['DayOfWeek'] = data.Date.dt.dayofweek
+    data['WeekOfYear'] = data.Date.dt.weekofyear
+
+    # CompetionOpen en PromoOpen from https://www.kaggle.com/
+    # Calculate time competition open time in months
+    features.append('CompetitionOpen')
+    data['CompetitionOpen'] = 12 * (data.Year - data.CompetitionOpenSinceYear) + \
+        (data.Month - data.CompetitionOpenSinceMonth)
+    # Promo open time in months
+    features.append('PromoOpen')
+    data['PromoOpen'] = 12 * (data.Year - data.Promo2SinceYear) + \
+        (data.WeekOfYear - data.Promo2SinceWeek) / 4.0
+    data['PromoOpen'] = data.PromoOpen.apply(lambda x: x if x > 0 else 0)
+    data.loc[data.Promo2SinceYear == 0, 'PromoOpen'] = 0
+
+    # Indicate that sales on that day are in promo interval
+    features.append('IsPromoMonth')
+    month2str = {1:'Jan', 2:'Feb', 3:'Mar', 4:'Apr', 5:'May', 6:'Jun', \
+             7:'Jul', 8:'Aug', 9:'Sept', 10:'Oct', 11:'Nov', 12:'Dec'}
+    data['monthStr'] = data.Month.map(month2str)
+    data.loc[data.PromoInterval == 0, 'PromoInterval'] = ''
+    data['IsPromoMonth'] = 0
+    for interval in data.PromoInterval.unique():
+        if interval != '':
+            for month in interval.split(','):
+                data.loc[(data.monthStr == month) & (data.PromoInterval == interval), 'IsPromoMonth'] = 1
+
+    return data
+
+
+## Start of main script
+
+print("Load the training, test and store data using pandas")
+types = {'CompetitionOpenSinceYear': np.dtype(int),
+         'CompetitionOpenSinceMonth': np.dtype(int),
+         'StateHoliday': np.dtype(str),
+         'Promo2SinceWeek': np.dtype(int),
+         'SchoolHoliday': np.dtype(float),
+         'PromoInterval': np.dtype(str)}
+train = pd.read_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\train.csv", parse_dates=[2], dtype=types)
+test = pd.read_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\test.csv", parse_dates=[3], dtype=types)
+store = pd.read_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\store.csv")
+
+print("Assume store open, if not provided")
+train.fillna(1, inplace=True)
+test.fillna(1, inplace=True)
+
+print("Consider only open stores for training. Closed stores wont count into the score.")
+train = train[train["Open"] != 0]
+print("Use only Sales bigger then zero. Simplifies calculation of rmspe")
+train = train[train["Sales"] > 0]
+
+print("Join with store")
+train = pd.merge(train, store, on='Store')
+test = pd.merge(test, store, on='Store')
+
+features = []
+
+print("augment features")
+build_features(features, train)
+build_features([], test)
+print(features)
+
+print('training data processed')
+
+params = {"objective": "reg:linear",
+          "booster" : "gbtree",
+          "eta": 0.3,
+          "max_depth": 10,
+          "subsample": 0.9,
+          "colsample_bytree": 0.7,
+          "silent": 1,
+          "seed": 1301
+          }
+num_boost_round = 120#300
+
+print("Train a XGBoost model")
+X_train, X_valid = train_test_split(train, test_size=0.012, random_state=10)
+y_train = np.log1p(X_train.Sales)
+y_valid = np.log1p(X_valid.Sales)
+dtrain = xgb.DMatrix(X_train[features], y_train)
+dvalid = xgb.DMatrix(X_valid[features], y_valid)
+
+watchlist = [(dtrain, 'train'), (dvalid, 'eval')]
+gbm = xgb.train(params, dtrain, num_boost_round, evals=watchlist, \
+  early_stopping_rounds=100, feval=rmspe_xg, verbose_eval=True)
+
+print("Validating")
+yhat = gbm.predict(xgb.DMatrix(X_valid[features]))
+error = rmspe(X_valid.Sales.values, np.expm1(yhat))
+print('RMSPE: {:.6f}'.format(error))
+
+test['StateHoliday'] = test['StateHoliday'].astype('int32')
+
+print("Make predictions on the test set")
+dtest = xgb.DMatrix(test[features])
+test_probs = gbm.predict(dtest)
+# Make Submission
+result = pd.DataFrame({"Id": test["Id"], 'Sales': np.expm1(test_probs)})
+result = result.sort_values(['Id'], ascending=[True])
+result.to_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\out.csv", index=False)
+
+# XGB feature importances
+# Based on https://www.kaggle.com/mmueller/liberty-mutual-group-property-inspection-prediction/xgb-feature-importance-python/code
+
+create_feature_map(features)
+importance = gbm.get_fscore(fmap='xgb.fmap')
+importance = sorted(importance.items(), key=operator.itemgetter(1))
+
+df = pd.DataFrame(importance, columns=['feature', 'fscore'])
+df['fscore'] = df['fscore'] / df['fscore'].sum()
+
+featp = df.plot(kind='barh', x='feature', y='fscore', legend=False, figsize=(6, 10))
+plt.title('XGBoost Feature Importance')
+plt.xlabel('relative importance')
+fig_featp = featp.get_figure()
+fig_featp.savefig('feature_importance_xgb.png', bbox_inches='tight', pad_inches=1)
