@@ -108,13 +108,13 @@ print('training data processed')
 params = {"objective": "reg:linear",
           "booster" : "gbtree",
           "eta": 0.3,
-          "max_depth": 10,
-          "subsample": 0.9,
+          "max_depth": 12,
+          "subsample": 0.85,
           "colsample_bytree": 0.7,
           "silent": 1,
           "seed": 1301
           }
-num_boost_round = 120#300
+num_boost_round = 120#number of iterations
 
 print("Train a XGBoost model")
 X_train, X_valid = train_test_split(train, test_size=0.012, random_state=10)
