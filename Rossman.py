@@ -9,8 +9,6 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 
-
-
 # Gather some features
 def build_features(features, data):
     # remove NaNs
