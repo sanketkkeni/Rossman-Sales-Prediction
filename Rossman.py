@@ -6,7 +6,6 @@ from sklearn.model_selection import train_test_split
 import xgboost as xgb
 import operator
 import matplotlib
-matplotlib.use("Agg") #Needed to save figures
 import matplotlib.pyplot as plt
 
 
@@ -93,8 +92,19 @@ print("augment features")
 build_features(features, train)
 build_features([], test)
 print(features)
-
 print('training data processed')
+
+
+# Split train-validation set
+X_train, X_valid = train_test_split(train, test_size=0.012, random_state=10)
+y_train = np.log1p(X_train.Sales)
+y_valid = np.log1p(X_valid.Sales)
+
+def rmspe(y, yhat):
+    return np.sqrt(np.mean(((y-yhat)/y) ** 2))
+
+
+#################### xgBoost Model
 '''
 eta - step size shrinkage used in update to prevents overfitting. After each 
 boosting step, we can directly get the weights of new features. and eta actually 
@@ -107,7 +117,6 @@ depth-wise grow policy.
 subsample- subsample ratio of the training instance
 
 '''
-
 params = {"objective": "reg:linear",
           "booster" : "gbtree",
           "eta": 0.3,
@@ -117,24 +126,22 @@ params = {"objective": "reg:linear",
           "silent": 1,
           "seed": 1301
           }
-num_boost_round = 170#number of iterations
+num_boost_round = 170 #number of iterations
 
-print("Train a XGBoost model")
-X_train, X_valid = train_test_split(train, test_size=0.012, random_state=10)
-y_train = np.log1p(X_train.Sales)
-y_valid = np.log1p(X_valid.Sales)
-dtrain = xgb.DMatrix(X_train[features], y_train)
-dvalid = xgb.DMatrix(X_valid[features], y_valid)
 
-def rmspe(y, yhat):
-    return np.sqrt(np.mean(((y-yhat)/y) ** 2))
+
 
 def rmspe_xg(yhat, y):
     y = np.expm1(y.get_label()) #get_label() - Get the label of the DMatrix.
     yhat = np.expm1(yhat)
     return "rmspe", rmspe(y,yhat)
 
+# As required by xgb.train
+dtrain = xgb.DMatrix(X_train[features], y_train)
+dvalid = xgb.DMatrix(X_valid[features], y_valid)
+
 watchlist = [(dtrain, 'train'), (dvalid, 'eval')]
+print("Train a XGBoost model")
 gbm = xgb.train(params, dtrain, num_boost_round, evals=watchlist, \
   early_stopping_rounds=100, feval=rmspe_xg, verbose_eval=True)
 
@@ -148,10 +155,12 @@ test['StateHoliday'] = test['StateHoliday'].astype('int32')
 print("Make predictions on the test set")
 dtest = xgb.DMatrix(test[features])
 test_probs = gbm.predict(dtest)
-# Make Submission
+
+### Submit on Kaggle
 result = pd.DataFrame({"Id": test["Id"], 'Sales': np.expm1(test_probs)})
 result = result.sort_values(['Id'], ascending=[True])
 result.to_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\out.csv", index=False)
+######
 
 # XGB feature importances
 # Based on https://www.kaggle.com/mmueller/liberty-mutual-group-property-inspection-prediction/xgb-feature-importance-python/code
@@ -174,3 +183,45 @@ plt.title('XGBoost Feature Importance')
 plt.xlabel('relative importance')
 fig_featp = featp.get_figure()
 fig_featp.savefig('feature_importance_xgb.png', bbox_inches='tight', pad_inches=1)
+################################################################################
+
+
+
+
+
+
+
+
+
+
+################# Random Forests
+from sklearn.ensemble import RandomForestRegressor
+rfr = RandomForestRegressor(n_estimators=10, verbose = 1)
+
+rfr.fit(X_train[features], y_train)
+
+y_pred = rfr.predict(X_valid[features])
+
+
+print("Validating")
+error = rmspe(np.expm1(y_pred), np.expm1(y_valid))
+print('RMSPE for Validation Set: {:.6f}'.format(error))
+
+
+test_pred = rfr.predict(test[features])
+
+### Submit on Kaggle
+result = pd.DataFrame({"Id": test["Id"], 'Sales': np.expm1(test_pred)})
+result = result.sort_values(['Id'], ascending=[True])
+result.to_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\out.csv", index=False)
+#######
+
+
+
+
+
+
+
+
+
+
