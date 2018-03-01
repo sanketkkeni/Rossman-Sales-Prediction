@@ -115,7 +115,6 @@ complex / likely to be overfitting. 0 indicates no limit, limit is required for
 depth-wise grow policy.
 
 subsample- subsample ratio of the training instance
-
 '''
 params = {"objective": "reg:linear",
           "booster" : "gbtree",
@@ -128,14 +127,18 @@ params = {"objective": "reg:linear",
           }
 num_boost_round = 170 #number of iterations
 
-
-
-
+# Used in xgb.train for evaluation
 def rmspe_xg(yhat, y):
     y = np.expm1(y.get_label()) #get_label() - Get the label of the DMatrix.
     yhat = np.expm1(yhat)
     return "rmspe", rmspe(y,yhat)
 
+
+'''
+Both xgboost and GBM follows the principle of gradient boosting. There are however,
+ the difference in modeling details. Specifically, xgboost used a more regularized 
+ model formalization to control over-fitting, which gives it better performance.
+ '''
 # As required by xgb.train
 dtrain = xgb.DMatrix(X_train[features], y_train)
 dvalid = xgb.DMatrix(X_valid[features], y_valid)
@@ -199,7 +202,6 @@ from sklearn.ensemble import RandomForestRegressor
 rfr = RandomForestRegressor(n_estimators=10, verbose = 1)
 
 rfr.fit(X_train[features], y_train)
-
 y_pred = rfr.predict(X_valid[features])
 
 
@@ -215,6 +217,53 @@ result = pd.DataFrame({"Id": test["Id"], 'Sales': np.expm1(test_pred)})
 result = result.sort_values(['Id'], ascending=[True])
 result.to_csv("C:\\Users\\Sanket Keni\\Desktop\\Genesis\\Rossman Sales\\out.csv", index=False)
 #######
+
+
+
+
+
+
+######### Decision Trees
+from sklearn.tree import DecisionTreeRegressor
+dtr = DecisionTreeRegressor(max_depth=4, random_state=42)
+dtr.fit(X_train[features], y_train)
+
+
+
+print("Validating")
+y_pred = dtr.predict(X_valid[features])
+error = rmspe(np.expm1(y_pred), np.expm1(y_valid))
+print('RMSPE for Validation Set: {:.6f}'.format(error))
+
+test_pred = dtr.predict(test[features])
+#############################################
+
+
+
+################ Adaboost Regressoion
+from sklearn.ensemble import AdaBoostRegressor
+from sklearn.tree import DecisionTreeRegressor
+abr = AdaBoostRegressor(DecisionTreeRegressor(max_depth=4),
+                          n_estimators=300, random_state=42)
+abr.fit(X_train[features], y_train)
+
+print("Validating")
+y_pred = abr.predict(X_valid[features])
+error = rmspe(np.expm1(y_pred), np.expm1(y_valid))
+print('RMSPE for Validation Set: {:.6f}'.format(error))
+
+test_pred = abr.predict(test[features])
+######################################################
+
+
+
+
+
+
+
+
+
+
 
 
 
