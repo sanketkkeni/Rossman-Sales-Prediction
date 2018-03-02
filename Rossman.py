@@ -9,6 +9,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 
+
+
 # Gather some features
 def build_features(features, data):
     # remove NaNs
@@ -92,6 +94,10 @@ build_features([], test)
 print(features)
 print('training data processed')
 
+# Removing the stores that are not present in test file- Only 
+# testing for 856 stores out of 1115
+unique = test.Store.unique()
+train = train[train['Store'].isin(unique)]
 
 # Split train-validation set
 X_train, X_valid = train_test_split(train, test_size=0.012, random_state=10)
