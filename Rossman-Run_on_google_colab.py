@@ -52,7 +52,6 @@ def build_features(features, data):
     data['DayOfWeek'] = data.Date.dt.dayofweek
     data['WeekOfYear'] = data.Date.dt.weekofyear
 
-    # CompetionOpen en PromoOpen from https://www.kaggle.com/ananya77041/rossmann-store-sales/randomforestpython/code
     # Calculate time competition open time in months
     features.append('CompetitionOpen')
     data['CompetitionOpen'] = 12 * (data.Year - data.CompetitionOpenSinceYear) + \
